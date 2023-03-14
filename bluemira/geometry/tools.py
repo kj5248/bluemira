@@ -218,7 +218,7 @@ def closed_wire_wrapper(drop_closure_point):
                     )
                 closed = True
                 if drop_closure_point:
-                    points = Coordinates(points.points[:-1])
+                    points = Coordinates(points.xyz[:, :-1])
             wire = func(points, label=label, closed=closed)
             if closed:
                 wire = cadapi.close_wire(wire)
@@ -891,6 +891,35 @@ def circular_pattern(
         new_shape.rotate(origin, direction, i * angle)
         shapes.append(new_shape)
     return shapes
+
+
+def mirror_shape(
+    shape: BluemiraGeo, base: tuple, direction: tuple, label=""
+) -> BluemiraGeo:
+    """
+    Get a mirrored copy of a shape about a plane.
+
+    Parameters
+    ----------
+    shape:
+        Shape to mirror
+    base:
+        Mirror plane base
+    direction:
+        Mirror plane normal direction
+
+    Returns
+    -------
+    mirrored_shape
+        The mirrored shape
+
+    Raises
+    ------
+    GeometryError: if the norm of the direction tuple is <= 3*EPS
+    """
+    if np.linalg.norm(direction) <= 3 * EPS:
+        raise GeometryError("Direction vector cannot have a zero norm.")
+    return convert(cadapi.mirror_shape(shape.shape, base, direction), label=label)
 
 
 # # =============================================================================

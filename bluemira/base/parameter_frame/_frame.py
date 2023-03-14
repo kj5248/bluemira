@@ -5,6 +5,7 @@ import json
 from contextlib import suppress
 from dataclasses import dataclass, fields
 from typing import (
+    TYPE_CHECKING,
     Any,
     Dict,
     Generator,
@@ -15,8 +16,9 @@ from typing import (
     Type,
     TypeVar,
     Union,
-    get_args,
 )
+from typing import _GenericAlias as GenericAlias  # TODO python >=3.9 import from types
+from typing import get_args, get_type_hints
 
 import pint
 from tabulate import tabulate
@@ -33,6 +35,10 @@ from bluemira.base.parameter_frame._parameter import (
     Parameter,
     ParameterValueType,
 )
+
+# due to circular import
+if TYPE_CHECKING:
+    from bluemira.base.reactor_config import ConfigParams
 
 _PfT = TypeVar("_PfT", bound="ParameterFrame")
 
@@ -53,6 +59,16 @@ class ParameterFrame:
 
     """
 
+    def __post_init__(self):
+        """Get types from frame"""
+        self._types = self._get_types()
+
+    @classmethod
+    def _get_types(cls) -> Dict[str, GenericAlias]:
+        """Gets types for the frame even with annotations imported"""
+        frame_type_hints = get_type_hints(cls)
+        return {f.name: frame_type_hints[f.name] for f in fields(cls)}
+
     def __iter__(self) -> Generator[Parameter, None, None]:
         """
         Iterate over this frame's parameters.
@@ -63,6 +79,19 @@ class ParameterFrame:
         for field in fields(self):
             yield getattr(self, field.name)
 
+    def update(
+        self,
+        new_values: Union[Dict[str, ParameterValueType], ParamDictT, ParameterFrame],
+    ):
+        """Update the given frame"""
+        if isinstance(new_values, ParameterFrame):
+            self.update_from_frame(new_values)
+        else:
+            try:
+                self.update_from_dict(new_values)
+            except TypeError:
+                self.update_values(new_values)
+
     def update_values(self, new_values: Dict[str, ParameterValueType], source: str = ""):
         """Update the given parameter values."""
         for key, value in new_values.items():
@@ -72,31 +101,38 @@ class ParameterFrame:
     def update_from_dict(self, new_values: ParamDictT):
         """Update from a dictionary representation of a ``ParameterFrame``"""
         for key, value in new_values.items():
-            param: Parameter = getattr(self, key)
             if "name" in value:
                 del value["name"]
-            value_type = _validate_parameter_field(
-                key, self.__dataclass_fields__[key].type
+            self._set_param(
+                key,
+                Parameter(
+                    name=key,
+                    **value,
+                    _value_types=_validate_parameter_field(key, self._types[key]),
+                ),
             )
-            new_param = Parameter(name=key, **value, _value_types=value_type)
-            param.set_value(new_param.value_as(param.unit), new_param.source)
-            if new_param.long_name != "":
-                param._long_name = new_param.long_name
-            if new_param.description != "":
-                param._description = new_param.description
 
     def update_from_frame(self, frame: ParameterFrame):
         """Update the frame with the values of another frame"""
         for o_param in frame:
             if hasattr(self, o_param.name):
-                param = getattr(self, o_param.name)
-                param.set_value(
-                    raw_uc(o_param.value, o_param.unit, param.unit), o_param.source
-                )
-                if o_param.long_name != "":
-                    param._long_name = o_param.long_name
-                if o_param.description != "":
-                    param._description = o_param.description
+                self._set_param(o_param.name, o_param)
+
+    def _set_param(self, name: str, o_param: Parameter):
+        """
+        Sets the information from a Parameter to an existing Parameter in this frame.
+        """
+        param = getattr(self, name)
+        param.set_value(
+            o_param.value
+            if param.unit == "" or o_param.value is None
+            else o_param.value_as(param.unit),
+            o_param.source,
+        )
+        if o_param.long_name != "":
+            param._long_name = o_param.long_name
+        if o_param.description != "":
+            param._description = o_param.description
 
     @classmethod
     def from_dict(
@@ -113,16 +149,9 @@ class ParameterFrame:
             except KeyError as e:
                 raise ValueError(f"Data for parameter '{member}' not found.") from e
 
-            value_type = _validate_parameter_field(
-                member, cls.__dataclass_fields__[member].type
-            )
-            try:
-                _validate_units(param_data, value_type)
-            except pint.errors.PintError as pe:
-                raise ValueError("Unit conversion failed") from pe
-
-            kwargs[member] = Parameter(
-                name=member, **param_data, _value_types=value_type
+            kwargs[member] = cls._member_data_to_parameter(
+                member,
+                param_data,
             )
 
         if not allow_unknown and len(data) > 0:
@@ -157,6 +186,65 @@ class ParameterFrame:
                 return cls.from_dict(json.load(f))
         # load from a JSON string
         return cls.from_dict(json.loads(json_in))
+
+    @classmethod
+    def from_config_params(cls: Type[_PfT], config_params: ConfigParams) -> _PfT:
+        """
+        Initialise an instance from a
+        :class:`~bluemira.base.reactor_config.ConfigParams` object.
+
+        A ConfigParams objects holds a ParameterFrame of global_params
+        and a dict of local_params. This function merges the two together
+        to form a unified ParameterFrame.
+
+        Parameters in global_params will overwrite those in
+        local_params, when defined in both.
+        All references to Parameters in global_params are maintained
+        (i.e. there's no copying).
+        """
+        kwargs = {}
+
+        lp = config_params.local_params
+        for member in cls.__dataclass_fields__:
+            if member not in lp:
+                continue
+            kwargs[member] = cls._member_data_to_parameter(
+                member,
+                lp[member],
+            )
+
+        gp = config_params.global_params
+        for member in cls.__dataclass_fields__:
+            if member not in gp.__dataclass_fields__:
+                continue
+            kwargs[member] = getattr(gp, member)
+
+        # now validate all dataclass_fields are in kwargs
+        # (which could be super set)
+        for member in cls.__dataclass_fields__:
+            try:
+                kwargs[member]
+            except KeyError as e:
+                raise ValueError(f"Data for parameter '{member}' not found.") from e
+
+        return cls(**kwargs)
+
+    @classmethod
+    def _member_data_to_parameter(
+        cls,
+        member: str,
+        member_param_data: Dict,
+    ) -> Parameter:
+        value_type = _validate_parameter_field(member, cls._get_types()[member])
+        try:
+            _validate_units(member_param_data, value_type)
+        except pint.errors.PintError as pe:
+            raise ValueError("Unit conversion failed") from pe
+        return Parameter(
+            name=member,
+            **member_param_data,
+            _value_types=value_type,
+        )
 
     def to_dict(self) -> Dict[str, Dict[str, Any]]:
         """Serialize this ParameterFrame to a dictionary."""
@@ -231,7 +319,6 @@ def _validate_parameter_field(field, member_type: Type) -> Tuple[Type, ...]:
 
 
 def _validate_units(param_data: Dict, value_type: Iterable[Type]):
-
     try:
         quantity = pint.Quantity(param_data["value"], param_data["unit"])
     except KeyError as ke:
@@ -386,8 +473,21 @@ def _non_comutative_unit_conversion(dimensionality, numerator, dpa, fpy):
     )
 
 
+@dataclass
+class EmptyFrame(ParameterFrame):
+    """
+    Class to represent an empty `ParameterFrame` (one with no Parameters).
+
+    Can be used when initializing a
+    :class:`~bluemire.base.reactor_config.ConfigParams` object with no global params.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+
 def make_parameter_frame(
-    params: Union[Dict[str, ParamDictT], ParameterFrame, str, None],
+    params: Union[Dict[str, ParamDictT], ParameterFrame, ConfigParams, str, None],
     param_cls: Type[_PfT],
 ) -> Union[_PfT, None]:
     """
@@ -395,7 +495,7 @@ def make_parameter_frame(
 
     Parameters
     ----------
-    params: Union[Dict[str, ParamDictT], ParameterFrame, str, None]
+    params: Union[Dict[str, ParamDictT], ParameterFrame, ConfigParams str, None]
         The parameters to initialise the class with.
         This parameter can be several types:
 
@@ -408,6 +508,12 @@ def make_parameter_frame(
                 assigned to the new ParameterFrame's parameters. Note
                 that this makes no copies, so updates to parameters in
                 the new frame will propagate to the old, and vice versa.
+            * :class:`~bluemira.base.reactor_config.ConfigParams`:
+                An object that holds a `global_params` ParameterFrame
+                and a `local_params` dict, which are merged to create
+                a new ParameterFrame. Values defined in `local_params`
+                will be overwritten by those in `global_params` when
+                defined in both.
             * str:
                 The path to a JSON file, or, if the string starts with
                 '{', a JSON string.
@@ -425,6 +531,8 @@ def make_parameter_frame(
         A frame of the type `param_cls`, or `None` if `params` and
         `param_cls` are both `None`.
     """
+    from bluemira.base.reactor_config import ConfigParams
+
     if param_cls is None:
         if params is None:
             # Case for where there are no parameters associated with the object
@@ -438,4 +546,6 @@ def make_parameter_frame(
         return param_cls.from_json(params)
     elif isinstance(params, ParameterFrame):
         return param_cls.from_frame(params)
+    elif isinstance(params, ConfigParams):
+        return param_cls.from_config_params(params)
     raise TypeError(f"Cannot interpret type '{type(params)}' as {param_cls.__name__}.")

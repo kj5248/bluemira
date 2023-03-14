@@ -33,7 +33,6 @@ from tests.codes.process import utilities as utils
 
 
 class TestTeardown:
-
     MODULE_REF = "bluemira.codes.process._teardown"
     IS_FILE_REF = f"{MODULE_REF}.os.path.isfile"
 
@@ -111,6 +110,16 @@ class TestTeardown:
                     teardown.read()
 
         assert np.isnan(teardown.params.e_nbi.value)
+
+    def test_CodesError_on_bad_output(self):
+        class MFile:
+            def __init__(self, file):
+                self.data = {"ifail": {"scan01": 2}}
+
+        with pytest.raises(CodesError):
+            with mock.patch("bluemira.codes.process._teardown.os.path.isfile"):
+                with mock.patch("bluemira.codes.process._teardown.MFile", new=MFile):
+                    _MFileWrapper(None)
 
     @pytest.mark.parametrize(
         "run_func, data_dir", [("runinput", utils.RUN_DIR), ("readall", utils.READ_DIR)]

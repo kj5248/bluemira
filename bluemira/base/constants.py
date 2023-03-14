@@ -28,6 +28,7 @@ from typing import Callable, List, Optional, Union
 import numpy as np
 from periodictable import elements
 from pint import Context, Quantity, Unit, UnitRegistry, set_application_registry
+from pint.errors import PintError
 from pint.util import UnitsContainer
 
 
@@ -51,7 +52,6 @@ class BMUnitRegistry(UnitRegistry):
     """
 
     def __init__(self):
-
         # Preprocessor replacements have spaces so
         # the units dont become prefixes or get prefixed
         # space before on % so that M% is not a thing
@@ -189,11 +189,9 @@ class BMUnitRegistry(UnitRegistry):
             [UnitRegistry, Union[float, complex, Quantity]], float
         ],
     ):
-
         formatters = ["{}", "{} / [time]"]
 
         for form in formatters:
-
             context.add_transformation(
                 form.format(units_from), form.format(units_to), forward_transform
             )
@@ -276,6 +274,10 @@ MU_0 = ureg.Quantity("mu_0").to_base_units().magnitude  # [T.m/A] or [V.s/(A.m)]
 
 # Vacuum permittivity
 EPS_0 = ureg.Quantity("eps_0").to_base_units().magnitude  # [A^2.s^4/kg/m^3]
+
+
+# Commonly used..
+MU_0_2PI = 2e-7  # [T.m/A] or [V.s/(A.m)]
 
 # Commonly used..
 MU_0_4PI = 1e-7  # [T.m/A] or [V.s/(A.m)]
@@ -367,6 +369,17 @@ YR_TO_S = ureg.Quantity(1, ureg.year).to(ureg.second).magnitude
 
 # Seconds to years
 S_TO_YR = ureg.Quantity(1, ureg.second).to(ureg.year).magnitude
+
+
+def units_compatible(unit_1: str, unit_2: str) -> bool:
+    """
+    Test if units are compatible
+    """
+    try:
+        raw_uc(1, unit_1, unit_2)
+        return True
+    except PintError:
+        return False
 
 
 def raw_uc(

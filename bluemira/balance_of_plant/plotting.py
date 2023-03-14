@@ -30,6 +30,7 @@ import numpy as np
 from matplotlib.sankey import Sankey
 from scipy.optimize import minimize
 
+from bluemira.base.constants import raw_uc
 from bluemira.display.palettes import BLUEMIRA_PALETTE
 
 
@@ -54,7 +55,7 @@ class SuperSankey(Sankey):
         future=None,
         connect=(0, 0),
         rotation=0,
-        **kwargs
+        **kwargs,
     ):
         __doc__ = super().__doc__  # noqa :F841
         # Here we first check if the "add" method has received arguments that
@@ -71,7 +72,7 @@ class SuperSankey(Sankey):
                 prior,
                 connect,
                 rotation,
-                **kwargs
+                **kwargs,
             )
         else:
             # There are two connections, use new method
@@ -86,7 +87,7 @@ class SuperSankey(Sankey):
                 future,
                 connect,
                 rotation,
-                **kwargs
+                **kwargs,
             )
 
     def _double_connect(
@@ -101,7 +102,7 @@ class SuperSankey(Sankey):
         future,
         connect,
         rotation,
-        **kwargs
+        **kwargs,
     ):
         """
         Handles two connections in a Sankey diagram.
@@ -245,6 +246,14 @@ class BalanceOfPlantPlotter:
         self.fig = None
         self.sankey = None
 
+    def _scale_flows(self, flow_dict):
+        plot_unit = self.plot_options.get("unit", "MW")
+        flow_unit = "W"
+
+        for k, v in flow_dict.items():
+            flow_dict[k] = [raw_uc(vi, flow_unit, plot_unit) for vi in v]
+        return flow_dict
+
     def plot(self, flow_dict, title=None):
         """
         Plots the BalanceOfPlant system, based on the inputs and flows.
@@ -258,6 +267,7 @@ class BalanceOfPlantPlotter:
         flow_dict: dict
             The dictionary of flows for each of the Sankey diagrams.
         """
+        flow_dict = self._scale_flows(flow_dict)
         # Build the base figure object
         self.fig = plt.figure(
             figsize=self.plot_options["figsize"],

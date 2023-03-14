@@ -24,8 +24,14 @@ import pytest
 from matplotlib import pyplot as plt
 from scipy.spatial import ConvexHull
 
+from bluemira.equilibria.flux_surfaces import ClosedFluxSurface
 from bluemira.equilibria.shapes import (
+    CunninghamLCFS,
     JohnerLCFS,
+    KuiroukidisLCFS,
+    ManickamLCFS,
+    ZakharovLCFS,
+    _generate_theta,
     flux_surface_cunningham,
     flux_surface_johner,
     flux_surface_kuiroukidis,
@@ -42,9 +48,7 @@ class TestCunningham:
         "kappa, delta, delta2, ax, label",
         [
             pytest.param(1.6, 0.33, 0.5, [0, 0], "Normal", id="Normal"),
-            pytest.param(
-                1.6, -0.33, None, [0, 1], "Negative delta", id="Negative delta"
-            ),
+            pytest.param(1.6, -0.33, 0.0, [0, 1], "Negative delta", id="Negative delta"),
             pytest.param(1.6, 0.33, 0.5, [1, 1], "Indent 1.5", id="Indent 1.5"),
             pytest.param(1.6, 0.33, 0.25, [1, 0], "Indent 1.5", id="Indent 1.5_2"),
             pytest.param(1.6, 0, 0.3, [2, 0], "Indent $delta$=0", id="Indent delta=0"),
@@ -54,12 +58,12 @@ class TestCunningham:
             pytest.param(
                 1,
                 0,
-                None,
+                0.0,
                 [3, 0],
                 "$\\delta$=0\n$\\kappa$=1",
                 id="$\\delta$=0\n$\\kappa$=1",
             ),
-            pytest.param(1.6, 0, None, [3, 1], "$\\delta$=0", id="$\\delta$=0"),
+            pytest.param(1.6, 0, 0.0, [3, 1], "$\\delta$=0", id="$\\delta$=0"),
         ],
     )
     def test_cunningham(self, kappa, delta, delta2, ax, label):
@@ -269,3 +273,105 @@ class TestJohnerCAD:
         wire_neg = p_neg.create_shape()
 
         assert np.isclose(wire_pos.length, wire_neg.length)
+
+
+class TestKuiroukidisCAD:
+    def test_segments(self):
+        p = KuiroukidisLCFS()
+        wire = p.create_shape()
+        assert len(wire._boundary) == 4
+
+    def test_symmetry(self):
+        p_pos = KuiroukidisLCFS()
+        p_neg = KuiroukidisLCFS()
+
+        p_pos.adjust_variable("delta_u", 0.4)
+        p_pos.adjust_variable("delta_l", 0.4)
+        p_neg.adjust_variable("delta_u", -0.4, lower_bound=-0.5)
+        p_neg.adjust_variable("delta_l", -0.4, lower_bound=-0.5)
+        wire_pos = p_pos.create_shape()
+        wire_neg = p_neg.create_shape()
+
+        assert np.isclose(wire_pos.length, wire_neg.length)
+
+
+class TestManickamCunninghamZakahrovCAD:
+    @pytest.mark.parametrize(
+        "parameterisation", [ManickamLCFS, CunninghamLCFS, ZakharovLCFS]
+    )
+    def test_segments(self, parameterisation):
+        p = parameterisation()
+        wire = p.create_shape()
+        assert len(wire._boundary) == 1
+
+    @pytest.mark.parametrize(
+        "parameterisation", [ManickamLCFS, CunninghamLCFS, ZakharovLCFS]
+    )
+    def test_symmetry(self, parameterisation):
+        p_pos = parameterisation()
+        p_neg = parameterisation()
+
+        p_pos.adjust_variable("delta", 0.4)
+        p_neg.adjust_variable("delta", -0.4, lower_bound=-0.5)
+        wire_pos = p_pos.create_shape()
+        wire_neg = p_neg.create_shape()
+
+        assert np.isclose(wire_pos.length, wire_neg.length)
+
+    @pytest.mark.parametrize("parameterisation", [ZakharovLCFS])
+    @pytest.mark.parametrize("delta", [0.33, -0.33, 0.5, -0.5, 0])
+    def test_delta(self, parameterisation, delta):
+        pos = parameterisation()
+        lb, ub = 0.9 * delta, 1.1 * delta
+        lb, ub = min(lb, ub), max(lb, ub)
+        pos.adjust_variable("delta", delta, lower_bound=lb, upper_bound=ub)
+        wire = pos.create_shape(n_points=25)
+
+        fs = ClosedFluxSurface(wire.discretize(ndiscr=1000, byedges=True))
+        np.testing.assert_almost_equal(delta, fs.delta)
+
+    @pytest.mark.xfail
+    @pytest.mark.parametrize("parameterisation", [CunninghamLCFS, ManickamLCFS])
+    @pytest.mark.parametrize("delta", [0.33, -0.33, 0.5, -0.5])
+    def test_delta_fail(self, parameterisation, delta):
+        pos = parameterisation()
+        lb, ub = 0.9 * delta, 1.1 * delta
+        lb, ub = min(lb, ub), max(lb, ub)
+        pos.adjust_variable("delta", delta, lower_bound=lb, upper_bound=ub)
+        wire = pos.create_shape(n_points=25)
+
+        fs = ClosedFluxSurface(wire.discretize(ndiscr=1000, byedges=True))
+        np.testing.assert_almost_equal(delta, fs.delta)
+
+    @pytest.mark.parametrize(
+        "parameterisation", [ManickamLCFS, CunninghamLCFS, ZakharovLCFS]
+    )
+    @pytest.mark.parametrize("kappa", [1.0, 1.5, 2.0])
+    def test_kappa(self, parameterisation, kappa):
+        pos = parameterisation()
+        lb, ub = 0.9 * kappa, 1.1 * kappa
+        pos.adjust_variable("kappa", kappa, lower_bound=lb, upper_bound=ub)
+        wire = pos.create_shape(n_points=25)
+
+        fs = ClosedFluxSurface(wire.discretize(ndiscr=1000, byedges=True))
+        np.testing.assert_almost_equal(kappa, fs.kappa)
+
+
+class TestGenerateTheta:
+    @pytest.mark.parametrize("n", [1, 2, 3, 4])
+    def test_quarts(self, n):
+        t = _generate_theta(n)
+        assert t.size == n
+        np.testing.assert_allclose(t, np.pi * np.array([0, 0.5, 1, 1.5, 2])[:n])
+
+    @pytest.mark.parametrize(
+        "n", [5, 6, 7, 8, 20, 21, 22, 23, 24, 25, 100, 200, 250, 256, 1001]
+    )
+    def test_n(self, n):
+        t = _generate_theta(n)
+        assert t.size == n
+
+    @pytest.mark.parametrize("n", [250, 256, 1000, 100, 200])
+    def test_high_n(self, n):
+        t = _generate_theta(n)
+        assert t.size == n

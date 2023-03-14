@@ -42,15 +42,16 @@ combine them.
 
 # %%
 from dataclasses import dataclass
-from typing import Callable, Dict
+from typing import Dict
 
 import numpy as np
 
 from bluemira.base.builder import Builder, ComponentManager
 from bluemira.base.components import Component, PhysicalComponent
 from bluemira.base.designer import Designer
-from bluemira.base.parameter_frame import Parameter, ParameterFrame
+from bluemira.base.parameter_frame import EmptyFrame, Parameter, ParameterFrame
 from bluemira.base.reactor import Reactor
+from bluemira.base.reactor_config import ReactorConfig
 from bluemira.display.palettes import BLUE_PALETTE
 from bluemira.equilibria.shapes import JohnerLCFS
 from bluemira.geometry.face import BluemiraFace
@@ -116,6 +117,7 @@ class TFCoilBuilderParams(ParameterFrame):
 #
 # To manage access to properties of the components we need some `ComponentManagers`
 
+
 # %%
 class Plasma(ComponentManager):
     """Plasma manager"""
@@ -145,6 +147,7 @@ class TFCoil(ComponentManager):
 # We then need a reactor in which to store the components.
 # Notice that the typing of the components here is the relevent `ComponentManager`
 
+
 # %%
 class MyReactor(Reactor):
     """Reactor container"""
@@ -160,9 +163,10 @@ class MyReactor(Reactor):
 # the any part of the coil is always a minimum distance away from the plasma.
 #
 # Further information on geometry can be found in the
-# [geometry tutorial](../geometry/geometry_tutorial.ipynb) and information about
+# [geometry tutorial](../geometry/geometry_tutorial.ex.py) and information about
 # geometry optimisation can be found in the
-# [geometry optimisation tutorial](../geometry/optimisation_tutorial.ipynb).
+# [geometry optimisation tutorial](../geometry/optimisation_tutorial.ex.py).
+
 
 # %%
 class MyTFCoilOptProblem(GeometryOptimisationProblem):
@@ -220,7 +224,7 @@ class MyTFCoilOptProblem(GeometryOptimisationProblem):
 
     @staticmethod
     def f_constraint(
-        constraint: Callable,
+        constraint: np.ndarray,
         vector: np.ndarray,
         grad: np.ndarray,
         parameterisation: GeometryParameterisation,
@@ -261,6 +265,7 @@ class MyTFCoilOptProblem(GeometryOptimisationProblem):
 #
 # In this case `PlasmaDesigner` has some required parameters but `PlasmaBuilder` does
 # not
+
 
 # %%
 class PlasmaDesigner(Designer):
@@ -331,7 +336,7 @@ class PlasmaBuilder(Builder):
         Build the 3D (xyz) Component of the plasma by revolving the given face
         360 degrees.
         """
-        shape = revolve_shape(lcfs, degree=359)
+        shape = revolve_shape(lcfs, degree=360)
         component = PhysicalComponent("LCFS", shape)
         component.display_cad_options.color = BLUE_PALETTE["PL"]
         component.display_cad_options.transparency = 0.5
@@ -354,6 +359,7 @@ class PlasmaBuilder(Builder):
 # be modified.
 #
 # Notice that only `TFCoilBuilder` has required parameters in this case.
+
 
 # %%
 class TFCoilDesigner(Designer):
@@ -453,7 +459,7 @@ build_config = {
     # be used to set parameters that are shared between components
     "params": {},
     "Plasma": {
-        "Designer": {
+        "designer": {
             "params": {
                 "R_0": {
                     "value": 9.0,
@@ -505,7 +511,8 @@ build_config = {
         },
     },
     "TF Coil": {
-        "Designer": {
+        "params": {},
+        "designer": {
             "runmode": "run",
             "param_class": "PrincetonD",
             "var_dict": {
@@ -513,7 +520,7 @@ build_config = {
                 "x2": {"value": 15, "lower_bound": 12},
             },
         },
-        "Builder": {
+        "builder": {
             "params": {
                 "tf_wp_width": {
                     "value": 0.6,
@@ -532,31 +539,29 @@ build_config = {
     },
 }
 
-
 # %% [markdown]
 #
 # Now we set up our ParameterFrames
 
 # %%
-# TODO improve build config manipulation
-plasma_params = PlasmaDesignerParams.from_dict(
-    {**build_config["params"], **build_config["Plasma"]["Designer"].pop("params")}
-)
 
-tf_coil_params = TFCoilBuilderParams.from_dict(
-    {**build_config["params"], **build_config["TF Coil"]["Builder"].pop("params")}
-)
+reactor_config = ReactorConfig(build_config, EmptyFrame)
+
 
 # %% [markdown]
 #
 # We create our plasma
 
 # %%
-plasma_designer = PlasmaDesigner(plasma_params, build_config["Plasma"])
+plasma_designer = PlasmaDesigner(
+    reactor_config.params_for("Plasma", "designer"),
+    reactor_config.config_for("Plasma", "designer"),
+)
 plasma_parameterisation = plasma_designer.execute()
 
 plasma_builder = PlasmaBuilder(
-    plasma_parameterisation.create_shape(), build_config["Plasma"]
+    plasma_parameterisation.create_shape(),
+    reactor_config.config_for("Plasma"),
 )
 plasma = Plasma(plasma_builder.build())
 
@@ -566,11 +571,14 @@ plasma = Plasma(plasma_builder.build())
 
 # %%
 tf_coil_designer = TFCoilDesigner(
-    plasma.lcfs(), None, build_config["TF Coil"]["Designer"]
+    plasma.lcfs(), None, reactor_config.config_for("TF Coil", "designer")
 )
 tf_parameterisation = tf_coil_designer.execute()
 
-tf_coil_builder = TFCoilBuilder(tf_coil_params, tf_parameterisation.create_shape())
+tf_coil_builder = TFCoilBuilder(
+    reactor_config.params_for("TF Coil", "builder"),
+    tf_parameterisation.create_shape(),
+)
 tf_coil = TFCoil(tf_coil_builder.build())
 
 # %% [markdown]
@@ -584,3 +592,4 @@ reactor.plasma = plasma
 reactor.tf_coil = tf_coil
 
 reactor.show_cad()
+reactor.show_cad("xz")

@@ -33,6 +33,7 @@ from numpy.linalg import norm
 import bluemira.codes._freecadapi as cadapi
 from bluemira.base.constants import EPS
 from bluemira.base.file import get_bluemira_path
+from bluemira.geometry.error import GeometryError
 from bluemira.geometry.face import BluemiraFace
 from bluemira.geometry.parameterisations import (
     PictureFrame,
@@ -54,6 +55,7 @@ from bluemira.geometry.tools import (
     make_circle_arc_3P,
     make_ellipse,
     make_polygon,
+    mirror_shape,
     offset_wire,
     point_inside_shape,
     revolve_shape,
@@ -105,6 +107,16 @@ class TestMakePolygon:
         assert wire.is_closed()
         assert np.isclose(wire.length, 4.0)
 
+    @pytest.mark.parametrize("closed", [True, False])
+    def test_closed_wire_with_triangle_points(self, closed):
+        wire = make_polygon(
+            {"x": [1, 2, 2, 1], "y": 0, "z": [1, 1, 2, 1]}, closed=closed
+        )
+        assert wire.is_closed()
+        assert np.isclose(wire.bounding_box.y_min, 0.0)
+        assert np.isclose(wire.bounding_box.y_max, 0.0)
+        assert np.isclose(wire.length, 2 + np.sqrt(2))
+
 
 class TestSignedDistanceFunctions:
     @classmethod
@@ -117,7 +129,6 @@ class TestSignedDistanceFunctions:
         cls.subject_wire = make_polygon(np.array([x, y, z]).T)
 
     def test_sdf_2d(self):
-
         p1 = np.array([0, 0])  # Corner point
         p2 = np.array([0.5, -0.5])  # Mid edge point
         p3 = np.array([3, 0])  # Inside point
@@ -290,7 +301,6 @@ class TestWirePlaneIntersect:
 
 
 class TestSolidFacePlaneIntersect:
-
     big = 10
     small = 5
     centre = 15
@@ -334,7 +344,6 @@ class TestSolidFacePlaneIntersect:
         ]
 
     def test_solid_nested_donut(self):
-
         circ = make_circle(self.small, [0, 0, self.centre], axis=[0, 1, 0])
         circ2 = make_circle(self.big, [0, 0, self.centre], axis=[0, 1, 0])
 
@@ -358,7 +367,6 @@ class TestSolidFacePlaneIntersect:
         assert no_small == 2
 
     def test_primitive_cut(self):
-
         path = PrincetonD({"x2": {"value": self.big}}).create_shape()
         p2 = offset_wire(path, self.offset)
         face = BluemiraFace([p2, path])
@@ -371,7 +379,6 @@ class TestSolidFacePlaneIntersect:
         assert len(_slice_xz) == 2
 
     def test_polygon_cut(self):
-
         face = BluemiraFace(generic_wire)
         _slice_face = slice_shape(face, BluemiraPlane())
         assert generic_wire.length == _slice_face[0].length
@@ -581,7 +588,6 @@ def naughty_function_fallback(wire, var=1, *, var2=[1, 2], **kwargs):
 
 
 class TestLogFailedGeometryOperationSerialisation:
-
     wires = [
         make_polygon({"x": [0, 2, 2, 0], "y": [-1, -1, 1, 1]}, closed=True),
         make_circle(),
@@ -670,3 +676,42 @@ class TestSavingCAD:
 
         assert lines == []
         os.remove(generated_file)
+
+
+class TestMirrorShape:
+    wire = make_polygon(
+        {"x": [4, 6, 6, 4], "y": [5, 5, 5, 5], "z": [0, 0, 2, 2]}, closed=True
+    )
+    face = BluemiraFace(wire)
+    solid = extrude_shape(face, (0, 3, 0))
+    shell = solid.boundary[0]
+
+    shapes = [wire, face, solid, shell]
+
+    @pytest.mark.parametrize("shape", shapes)
+    @pytest.mark.parametrize(
+        "direction",
+        [(0, 0, 1), (0, 1, 0), (1, 0, 0), (0, 0, -1), (0, -1, 0), (-1, 0, 0)],
+    )
+    def test_base_mirror(self, shape, direction):
+        m_shape = mirror_shape(shape, (0, 0, 0), direction)
+        cog = shape.center_of_mass
+        m_cog = m_shape.center_of_mass
+        new_cog = cog
+        idx = np.where(list(direction))[0]
+        new_cog[idx] = -cog[idx]
+        assert np.isclose(m_shape.volume, shape.volume)
+        assert np.allclose(m_cog, new_cog)
+
+    @pytest.mark.parametrize("shape", shapes)
+    def test_awkward_mirror(self, shape):
+        m_shape = mirror_shape(shape, (4, 5, 0), (-1, -1, 0))
+        assert np.isclose(m_shape.volume, shape.volume)
+        cog = shape.center_of_mass
+        m_cog = m_shape.center_of_mass
+        assert not np.allclose(m_cog, cog)
+
+    @pytest.mark.parametrize("shape", shapes)
+    def test_bad_direction(self, shape):
+        with pytest.raises(GeometryError):
+            mirror_shape(shape, base=(0, 0, 0), direction=(EPS, EPS, EPS))

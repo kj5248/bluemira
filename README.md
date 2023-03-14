@@ -24,9 +24,16 @@ caused our feature roadmap to slip. A lot of functionality that was present in  
 changes in the near future. We apologise in advance for these. Please do get in touch
 before starting to use any modules, so we can warn you of changes to come.
 
-Below is an overview of our development roadmap for 2023:
-
-![bluemira-roadmap](./documentation/source/bluemira-roadmap.svg)
+Below is an overview of our development roadmap for 2023/24:
+<p align="center">
+  <a href="https://bluemira.readthedocs.io/en/latest/introduction.html#roadmap" target="_blank">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./documentation/source/bluemira-roadmap-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="./documentation/source/bluemira-roadmap.svg">
+      <img alt="Bluemira Roadmap" src="./documentation/source/bluemira-roadmap.svg">
+    </picture>
+  </a>
+</p>
 
 
 ## Modules
@@ -113,28 +120,11 @@ pre-commit install -f
 
 Please see the [guidelines for contributing to bluemira](CONTRIBUTING.md).
 
-In addition to the dependencies for installation, the following tools are useful for
-developing ``bluemira``:
-
-* Sphinx
-* Black
-
-Tests are run with `pytest`. To run the unit tests:
+Tests are run with `pytest`. To run the main tests:
 
 ```shell
 pytest
 ```
-
----
-
-If you don't have ``PROCESS`` installed then you'll need to edit
-`tests/test_reactor.py`.
-
-Change the line `"process_mode": "read"` to `"process_mode": "mock"`.
-
-For more information on PROCESS please see [here](https://ccfe.ukaea.uk/resources/process/)
-
----
 
 To run all the tests:
 
