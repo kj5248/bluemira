@@ -140,17 +140,17 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         self.current = current
 
         # direction vector for current
-        # this is along prism normal
-        # self.J_hat = normal
+        # this is along direction vector
         self.j_hat = ds / np.linalg.norm(ds)
         # direction vector for magnetisation
-        # perp to J
+        # perp to J (set to be perp to tvec
+        # but anything perp to J would work)
         j_cross_tvec = np.cross(self.j_hat, t_vec)
         self.mc_hat = j_cross_tvec / -np.linalg.norm(j_cross_tvec)
         # direction vector for magnetisation value
         # perp to J and Mc
         j_cross_m = np.cross(self.j_hat, self.mc_hat)
-        self.D_hat = j_cross_m / np.linalg.norm(j_cross_m)
+        self.d_hat = j_cross_m / np.linalg.norm(j_cross_m)
 
         # Normalised direction cosine matrix
         self.dcm = np.array([normal, t_vec, ds / self.length])
@@ -172,7 +172,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             else:
                 # converts from internal to external angle
                 self.theta = np.pi * np.ones(self.n - 1) - theta
-
+        # points of the prism
         self.points = self._calculate_points()
         self.facepoints = self._calculate_face_points()
         # set X location as center of start face
@@ -183,28 +183,40 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             z = self.points[k, 0, 2]
             sum += np.array([x, y, z])
         self.x = sum / self.n
+        # set up normals to all sides of prism
         self.normals = self._calculate_side_normals()
+        # set up cosine angles nprime and nprime2
         self.angles = self._calculate_angles()
-        self.geometry = self._calculate_geometric_parameters()
 
     def _calculate_points(self):
-        # points
+        """
+        Function to calculate all the points of the prism.
+        Points are calculated in local coordinates and then transformed to global.
+        """
         points = []
         # sum of rotational angles
         sum_theta = 0
         dl = 0
         # starting length
         len = self.length
+        # loop through sides but not last side as already will have those points
         for k in range(self.n - 1):
+            # set width as w for ease of use
             w = self.width[k]
+            # add rotational angle
             sum_theta += self.theta[k]
+            # variation in x and y using width and theta
             dxy = np.array([w * math.cos(sum_theta), -w * math.sin(sum_theta)])
+            # midpoint results in no z increase/decrease
             if np.abs(sum_theta) == math.pi:
                 # difference betwen point 1, 2, 3, 4
                 d_12 = [dxy[0], 0, 0]
                 d_23 = [0, 0, len]
                 d_34 = [-dxy[0], 0, 0]
+            # first half of shape z decreases, depending on alpha, on front face
+            # or depending on beta for rear face
             elif np.abs(sum_theta) < math.pi:
+                # change in z at front and rear face respectively
                 dz1 = dxy[1] / math.tan(self.alpha)
                 dz2 = dxy[1] / math.tan(self.beta)
                 dl += dz1 + dz2
@@ -212,7 +224,10 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 d_12 = np.array([dxy[0], dxy[1], dz1])
                 d_23 = np.array([0, 0, len - dz1 - dz2])
                 d_34 = np.array([-dxy[0], -dxy[1], dz2])
+            # second half of shape z increases, depending on alpha, on front face
+            # or depending on beta for rear face
             else:
+                # change in z at front and rear face respectively
                 dz1 = np.abs(dxy[1]) / math.tan(self.alpha)
                 dz2 = np.abs(dxy[1]) / math.tan(self.beta)
                 dl += dz1 + dz2
@@ -220,12 +235,13 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 d_12 = np.array([dxy[0], dxy[1], dz1])
                 d_23 = np.array([0, 0, len - dz1 - dz2])
                 d_34 = np.array([-dxy[0], -dxy[1], dz2])
+            # check for if shape gets inverted ie front and rear face overlap
             if (dl) > len:
                 bluemira_error(
                     "length at maximum shape depth becomes negative. Change either the angles (alpha, beta) or reduce shape depth."
                 )
                 sys.exit()
-            # points of side
+            # points of side set
             if k == 0:
                 p1 = np.array([0, 0, 0])
                 p2 = p1 + d_12
@@ -238,6 +254,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 p3 = p2 + d_23
             # set edge length to new starting edge
             len = math.dist(p3, p2)
+            # final side from other points that already exist and adding points to array
             if k == (self.n - 2):
                 points += [np.vstack([p1, p2, p3, p4, p1])]
                 p = np.array([p2[0] - p1[0], p2[1] - p1[1]])
@@ -251,9 +268,10 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 self.width = np.append(self.width, w)
                 theta = math.acos(np.dot(p, q) / (np.linalg.norm(p) * np.linalg.norm(q)))
                 self.theta = np.append(self.theta, theta)
+            # if not final side just adds points to array
             else:
                 points += [np.vstack([p1, p2, p3, p4, p1])]
-
+        # reorganise array and convert points to global
         points_array = []
         for p in points:
             points_array.append(self._local_to_global(p))
@@ -261,15 +279,21 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         return np.array(points_array)
 
     def _calculate_face_points(self):
-        # face points
+        """
+        Takes the prism vertex points and extracts the faces from them
+        """
         face1 = []
         face2 = []
+        # loop through all sides to extract end points
         for k in range(self.n):
             face1 += [self.points[k, 0, :]]
             face2 += [self.points[k, 3, :]]
+        # add face 1
         points = [np.vstack([np.array(face1)])]
+        # add face 2
         points += [np.vstack([np.array(face2)])]
         points_array = []
+        # reorganise array
         for p in points:
             points_array.append(p)
         return np.array(points_array)
@@ -280,9 +304,11 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         """
         pos = 0
         neg = 0
+        # loop through sides
         for k in range(self.n):
             n = self.normals[k, :]
             v = p - self.points[k, 0, :]
+            # value to determine where p is with respect to side
             dp = np.dot(v, n)
             if dp > 0:
                 pos += 1
@@ -291,9 +317,11 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             else:
                 pos += 1
                 neg += 1
+        # loop through faces
         for k in range(2):
             n = self.normals[k + self.n, :]
             v = p - self.facepoints[k, 0, :]
+            # value to determine where p is with respect to side
             dp = np.dot(v, n)
             if dp > 0:
                 pos += 1
@@ -338,6 +366,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             # normalise cross product vector
             n_hat = np.linalg.norm(u_cross_v)
             normals += [u_cross_v / n_hat]
+        # reorganise into array
         normals_array = []
         for n in normals:
             normals_array.append(n)
@@ -349,17 +378,22 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         (n' and n'' respectively)
         """
         angle_arr = []
+        # iterate through all the sides and faces
         for k in range(self.n + 2):
             n = self.normals[k, :]
             o = np.array([0, 0, 0])
+            # cosine of the angle between side normal and magnetisation direction
             n_prime = np.dot(n, self.mc_hat) / (
                 math.dist(n, o) * math.dist(self.mc_hat, o)
             )
+            # sets value to zero if small
             if np.abs(n_prime) < 1e-8:
                 n_prime = 0.0
+            # cosine of angle between side normal and magnetisation value direction
             n_prime2 = np.dot(n, self.d_hat) / (
                 math.dist(n, o) * math.dist(self.d_hat, o)
             )
+            # sets value to zero if small
             if np.abs(n_prime2) < 1e-8:
                 n_prime2 = 0.0
             angle_arr.append(np.vstack([n_prime, n_prime2]))
@@ -369,32 +403,11 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         """
         Calculate distance along vector v between point X and p
         """
+        # new point fpr p that is on plane of X
         p_prime = p - (np.dot(np.dot(p - self.x, v), v))
+        # calculates distance between p' and X along vector Dhat
         d = np.dot(p_prime - self.x, self.d_hat)
         return d
-
-    def _rotational_matrix(self, k):
-        """
-        Creates rotational matrix that would rotate points of a side
-        k such that the side normal becomes parallel to x_hat and the length
-        direction of the side (along J) is parallel to z_hat
-        """
-        n = self.normals[k, :]
-        n2 = np.cross(n, self.J_hat)
-        x_hat = np.array([1.0, 0.0, 0.0])
-        r = rotation_matrix_v1v2(x_hat, n)
-        n2 = np.matmul(r, n2)
-        x_hat2 = np.array([0.0, -1.0, 0.0])
-        r2 = rotation_matrix_v1v2(x_hat2, n2)
-        rt = np.matmul(r2, r)
-        return np.transpose(rt)
-
-    def _translation_matrix(self, v):
-        """
-        Translation matrix for vector v
-        """
-        t = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [v[0], v[1], v[2], 1]])
-        return t
 
     def _face_cutting(self, p):
         """
@@ -403,91 +416,29 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         shapes = []
         for i in range(self.n - 4):
             if i == 0:
+                # makes the first shape and loops back to start point
                 cut = np.append(p[:3, :], p[0, :])
             else:
+                # makes remaining shapes and loops back to start point
                 cut = np.append(p[(0, i + 1, i + 2), :], p[0, :])
+            # adds new shapes to list
             shapes += [np.vstack([cut])]
+        # creates final shape
         cut = np.append(p[0, :], p[-3:, :])
+        # adds start point to final shape
         cut = np.append(cut, p[0, :])
+        # adds final shape to list
         shapes += [np.vstack([cut])]
+        # rearranges shapes into array
         shape_arr = []
         for s in shapes:
             shape_arr.append(s)
         return np.array([shape_arr], dtype=object)
 
-    def _working_coordinates(self, p, fpoint):
-        """
-        Get all the working parameters of a side/ face with points p
-        for a field point fpoint. p and fpoint must already be rotated
-        when inputted
-        """
-        if self.n == 3:
-            p = np.append(p[:2, :], p[1:, :])
-        # array for distance between source and field point
-        r = np.array(
-            [
-                math.dist(fpoint, p[0, :]),
-                math.dist(fpoint, p[1, :]),
-                math.dist(fpoint, p[2, :]),
-                math.dist(fpoint, p[3, :]),
-            ]
-        )
-        # length 1->2 and 3->4
-        l_12 = math.dist(p[1, :], p[0, :])
-        l_34 = math.dist(p[3, :], p[2, :])
-        # set needed values from points
-        d = np.abs(p[0, 1] - p[2, 1])
-        z2 = p[1, 2]
-        z3 = p[2, 2]
-        z4 = p[3, 2]
-        p_12 = -z2 * fpoint[1] + d * fpoint[2]
-        p_34 = -(z3 - z4) * fpoint[1] + d * (fpoint[2] - z4)
-        q_12 = d * fpoint[1] + z2 * fpoint[2]
-        q_34 = d * fpoint[1] + (z3 - z4) * (fpoint[2] - z4)
-        lambda_12 = np.log((r[0] * l_12 - q_12) / ((r[1] + l_12) * l_12 - q_12))
-        lambda_34 = np.log(((r[2] + l_34) * l_34 - q_34) / (r[3] * l_34 - q_34))
-        lam = (
-            np.log(
-                ((r[0] + fpoint[2]) * (r[2] + fpoint[2] - z3))
-                / ((r[1] + fpoint[2] - z2) * (r[3] + fpoint[2] - z4))
-            )
-            + z2 * lambda_12 / l_12
-            + (z3 - z4) * lambda_34 / l_34
-        )
-        gam = (
-            math.atan((fpoint[2] * q_12 - z2 * r[0] * r[0]) / (fpoint[0] * r[0] * d))
-            - math.atan(
-                ((fpoint[2] - z2) * (q_12 - l_12 * l_12) - z2 * r[1] * r[1])
-                / (fpoint[0] * r[1] * d)
-            )
-            + math.atan(
-                ((fpoint[2] - z3) * (q_34 - l_34 * l_34) - (z3 - z4) * r[2] * r[2])
-                / (fpoint[0] * r[2] * d)
-            )
-            - math.atan(
-                ((fpoint[2] - z4) * q_34 - (z3 - z4) * r[3] * r[3])
-                / (fpoint[0] * r[3] * d)
-            )
-        )
-        psi = (
-            d * z2 * (r[0] - r[1]) / (l_12 * l_12)
-            + d * (z3 - z4) * (r[2] - r[3]) / (l_34 * l_34)
-            - d * d * (p_12 * lambda_12 / (l_12**3) + p_34 * lambda_34 / (l_34**3))
-        )
-        eta = d * (lambda_12 / l_12 + lambda_34 / l_34)
-        zeta = (
-            d
-            * d
-            * (
-                (r[0] - r[1]) / (l_12 * l_12)
-                + (r[2] - r[3]) / (l_34 * l_34)
-                + q_12 * lambda_12 / (l_12**3)
-                + q_34 * lambda_34 / (l_34**3)
-            )
-        )
-        return fpoint, lam, gam, psi, eta, zeta
-
     def _position_vector(self, point, fpoint):
+        """
+        Creates a vector R from the shape vertices to the fieldpoint
+        """
         r1 = fpoint - point[0, :]
         r2 = fpoint - point[1, :]
         r3 = fpoint - point[2, :]
@@ -495,16 +446,29 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         return np.array([r1, r2, r3, r4])
 
     def _length_vector(self, p, q, r):
+        """
+        Creates a set of vectors that go from point p to q on an existing shape
+        """
+        # position vector for point p
         rp = r[p - 1, :]
+        # position vector for point q
         rq = r[q - 1, :]
+        # length vector from p to q using position vectors
         len = rp - rq
         return len
 
     def _vector_coordinates(self, point, fpoint):
+        """
+        Creates a set of vector working coordinates that are used to calculate the
+        magnetic field for the prism. Does this for a side of the prism at a time.
+        """
+        # vector R between vertices and fieldpoint
         r = self._position_vector(point, fpoint)
+        # vector that sets z direction
         zhat = self._length_vector(1, 4, r) / np.linalg.norm(
             self._length_vector(1, 4, r)
         )
+        # value of z change between vertex 1 and p (=2,3,4)
         zp = np.array(
             [
                 [np.dot(zhat, self._length_vector(1, 2, r))],
@@ -512,25 +476,34 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 [np.dot(zhat, self._length_vector(1, 4, r))],
             ]
         )
+        # value d which is width of shape
         d = np.sqrt(np.linalg.norm(self._length_vector(1, 2, r)) ** 2 - zp[0] ** 2)
+        # vector that sets x direction
         xhat = np.cross(self._length_vector(1, 2, r), zhat) / d
+        # vector that sets y direction
         yhat = np.cross(zhat, xhat)
+        # x value (between vertex and fieldpoint)
         x = np.dot(xhat, r[0, :])
+        # if x suitably small set to 0
         if x < 1e-8:
             x = 0.0
-        # x = fpoint[0]
+        # y value (between vertex and fieldpoint)
         y = np.dot(yhat, r[0, :])
+        # if y suitably small set to 0
         if y < 1e-8:
             y = 0.0
-        # y = fpoint[1]
+        # z value (between vertex and fieldpoint)
         z = np.dot(zhat, r[0, :])
+        # if z suitably small set to 0
         if z < 1e-8:
             z = 0.0
-        # z = fpoint[2]
+        # projections of area vectors along normal to trapezoid side
         p12 = np.dot(xhat, np.cross(r[0, :], r[1, :]))
         p34 = np.dot(-xhat, np.cross(r[2, :], r[3, :]))
+        # scalar products of area vector
         q12 = np.dot(r[0, :], self._length_vector(1, 2, r))
         q34 = -np.dot(r[3, :], self._length_vector(3, 4, r))
+        # calculates some parameters to simplify later equations ie lam, psi, eta...
         lambda_12 = np.log(
             (
                 np.linalg.norm(r[0, :]) * np.linalg.norm(self._length_vector(1, 2, r))
@@ -553,6 +526,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 - q34
             )
         )
+        # major term used in calculation of h field
         lam = (
             np.log(
                 ((np.linalg.norm(r[0, :]) + z) * (np.linalg.norm(r[2, :]) + z - zp[1]))
@@ -564,7 +538,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             + zp[0] * lambda_12 / np.linalg.norm(self._length_vector(1, 2, r))
             + (zp[1] - zp[2]) * lambda_34 / np.linalg.norm(self._length_vector(3, 4, r))
         )
-
+        # components of gamma equation to simplify equation
         a1 = z * q12 - zp[0] * np.linalg.norm(r[0, :]) ** 2
         a2 = x * np.linalg.norm(r[0, :]) * d
         b1 = (z - zp[0]) * (
@@ -577,12 +551,14 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         c2 = x * np.linalg.norm(r[2, :]) * d
         d1 = (z - zp[2]) * q34 - (zp[1] - zp[2]) * np.linalg.norm(r[3, :]) ** 2
         d2 = x * np.linalg.norm(r[3, :]) * d
+        # major term used in calculation of h field
         gam = (
             np.arctan2(a1, a2)
             - np.arctan2(b1, b2)
             + np.arctan2(c1, c2)
             - np.arctan2(d1, d2)
         )
+        # major term used in calculation of h field
         psi = (
             d
             * zp[0]
@@ -599,10 +575,12 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 + p34 * lambda_34 / (np.linalg.norm(self._length_vector(3, 4, r)) ** 3)
             )
         )
+        # major term used in calculation of h field
         eta = d * (
             lambda_12 / np.linalg.norm(self._length_vector(1, 2, r))
             + lambda_34 / np.linalg.norm(self._length_vector(3, 4, r))
         )
+        # major term used in calculation of h field
         zeta = (
             d
             * d
@@ -615,194 +593,100 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 + q34 * lambda_34 / (np.linalg.norm(self._length_vector(3, 4, r)) ** 3)
             )
         )
+        # coordinates for x,y,z from perspective of shape
         coords = np.array([x, y, z])
+        # returns parameters needed in h field calculation
         return coords, lam, gam, psi, eta, zeta
 
     def _hxhyhz(self, fpoint):
+        """
+        Produces h field at fieldpoint using h field functions and vector coordinates
+        """
         h_array = []
         j = self.current
+        # h field contribution from sides
         for k in range(self.n):
+            # get pre-calculated values
             points = self.points[k, :, :]
             nprime = self.angles[k, 0]
             nprime2 = self.angles[k, 1]
-            # print("side", k)
-            # print("angles", nprime, nprime2)
+            # get vector values from functions
             d = self._calculate_vector_distance(points[0, :], self.normals[k, :])
-            # print("D", D)
             coords, lam, gam, psi, eta, zeta = self._vector_coordinates(points, fpoint)
-            # print("coords", coords)
-            # print("lambda", lam)
-            # print("gamma", gam)
-            # print("eta", eta)
-            # print("zeta", zeta)
+            # calculate h field in all directions
             hx = h_field_x(j, nprime, nprime2, d, coords, lam, gam, psi)
             hy = h_field_y(j, nprime, nprime2, d, coords, lam, gam, psi)
             hz = h_field_z(j, nprime, d, eta, zeta)
+            # add outputs to array
             h_array.append(np.hstack([hx, hy, hz]))
 
+        # h field contribution from faces
         for k in range(2):
+            # get pre-calculated values
             points = self.facepoints[k, :, :]
             nprime = self.angles[k + self.n, 0]
+            # if there are more than 4 sides to a face
+            # it must be broken down into 3 or 4 sided shapes
             if self.n > 4:
+                # splits face into smaller shapes
                 shapes = self._face_cutting(points)
+                # cycle through shapes to calculate field
                 for i in range(self.n - 4):
                     shape = shapes[i, :, :]
                     dist = []
                     for p in shape:
                         dist += [self._calculate_vector_distance(p, self.normals[k, :])]
+                    # takes distance as the maximum from all the points
                     d = np.max(dist)
-
+                    # value always zero for face
                     nprime2 = 0
+                    # get working vector coordinates
                     coords, lam, gam, psi, eta, zeta = self._vector_coordinates(
                         points, fpoint
                     )
+                    # calcaulte h field
                     hx = h_field_x(j, nprime, nprime2, d, coords, lam, gam, psi)
                     hy = h_field_y(j, nprime, nprime2, d, coords, lam, gam, psi)
                     hz = h_field_z(j, nprime, d, eta, zeta)
+                    # add outputs to array
                     h_array.append(np.hstack([hx, hy, hz]))
-
+            # has few enough sides so can just straight calculate fields
             else:
                 dist = []
+                # calculate the distance for all points of face
                 for p in points:
                     dist += [self._calculate_vector_distance(p, self.normals[k, :])]
+                # take the distance to be maximum value
                 d = np.max(dist)
+                # value always zero for face
                 nprime2 = 0
+                # get working vector coordinates
                 coords, lam, gam, psi, eta, zeta = self._vector_coordinates(
                     points, fpoint
                 )
+                # calcaulte h field
                 hx = h_field_x(j, nprime, nprime2, d, coords, lam, gam, psi)
                 hy = h_field_y(j, nprime, nprime2, d, coords, lam, gam, psi)
                 hz = h_field_z(j, nprime, d, eta, zeta)
+                # add outputs to array
                 h_array.append(np.hstack([hx, hy, hz]))
-        # print(H_array)
 
+        # reorganise array and include magnetisation before returning
         hx = 0
         hy = 0
         hz = 0
-
         for h in h_array:
             hx += h[0]
             hy += h[1]
             hz += h[2]
-
         h = [hx, hy, hz]
         h = h + self._calculate_mc(fpoint)
         return h
 
-    def _hxhyhz2(self, point):
-        """
-        Calculate the magnetic field strength at a point in local coordinates.
-        """
-        h_array = []
-        r_matrices = []
-        t_matrices = []
-        for k in range(self.n):
-            # rotation matrix
-            rot = self._rotational_matrix(k)
-            r_matrices += [rot]
-            points = self.points[k, :, :]
-            # rotate side to working location
-            p = np.matmul(points, rot)
-            # translate side to origin
-            p_t = -p[0, :]
-            tmat = self._translation_matrix(p_t)
-            t_matrices += [tmat]
-            p = np.append(p, np.ones((self.n + 1, 1)), axis=1)
-            p = np.matmul(p, tmat)[:, :3]
-
-            # rotate fpoint to working location and translate to origin
-            fpoint = np.matmul(point, rot)
-            fpoint = np.append(fpoint, 1)
-            fpoint = np.matmul(fpoint, tmat)[:3]
-            nprime = self.angles[k, 0]
-            nprime2 = self.angles[k, 1]
-            j = self.current
-            d = self._calculate_vector_distance(p[0, :], self.normals[k, :])
-            fpoint, lam, gam, psi, eta, zeta = self._working_coordinates(p, fpoint)
-            hx = h_field_x(j, nprime, nprime2, d, fpoint, lam, gam, psi)
-            hy = h_field_y(j, nprime, nprime2, d, fpoint, lam, gam, psi)
-            hz = h_field_z(j, nprime, d, eta, zeta)
-            h_array.append(np.hstack([hx, hy, hz]))
-
-        for k in range(2):
-            """
-            for faces need to seperate into triangles and trapezoids
-            before distance D and working coords can be calculated
-            """
-            # rotation matrix
-            rot = self._rotational_matrix(k)
-            r_matrices += [rot]
-            points = self.facepoints[k, :, :]
-            # rotate side to working location
-            p = np.matmul(points, rot)
-            # translate side to origin
-            p_t = -p[0, :]
-            tmat = self._translation_matrix(p_t)
-            t_matrices += [tmat]
-            p = np.append(p, np.ones((self.n + 1, 1)), axis=1)
-            p = np.matmul(p, tmat)[:, :3]
-            # rotate fpoint to working location and translate to origin
-            fpoint = np.matmul(point, rot)
-            fpoint = np.append(fpoint, 1)
-            fpoint = np.matmul(fpoint, tmat)[:3]
-            nprime = self.angles[k, 0]
-            nprime2 = self.angles[k, 1]
-            j = self.current
-
-            if self.n > 4:
-                shapes = self._face_cutting(p)
-                d = []
-                for i in range(self.n - 4):
-                    shape = shapes[i, :, :]
-                    dist = []
-                    for p in shape:
-                        dist += [self._calculate_vector_distance(p, self.normals[k, :])]
-                    dist = np.max(d)
-
-                    d += [dist]
-                    nprime2 = 0
-                    fpoint, lam, gam, psi, eta, zeta = self._working_coordinates(
-                        p, fpoint
-                    )
-                    hx = h_field_x(j, nprime, nprime2, d, fpoint, lam, gam, psi)
-                    hy = h_field_y(j, nprime, nprime2, d, fpoint, lam, gam, psi)
-                    hz = h_field_z(j, nprime, d, eta, zeta)
-                    h_array.append(np.hstack([hx, hy, hz]))
-
-                else:
-                    shapes = p
-                    for p in shapes:
-                        dist += [self._calculate_vector_distance(p, self.normals[k, :])]
-                    dist = np.max(d)
-                    nprime2 = 0
-                    fpoint, lam, gam, psi, eta, zeta = self._working_coordinates(
-                        p, fpoint
-                    )
-                    hx = h_field_x(j, nprime, nprime2, d, fpoint, lam, gam, psi)
-                    hy = h_field_y(j, nprime, nprime2, d, fpoint, lam, gam, psi)
-                    hz = h_field_z(j, nprime, d, eta, zeta)
-                    h_array.append(np.hstack([hx, hy, hz]))
-
-        hx = 0
-        hy = 0
-        hz = 0
-        counter = 0
-        for h in h_array:
-            h = np.append(h, 1)
-            h = np.matmul(h, np.linalg.inv(t_matrices[counter]))[:3]
-            h = np.matmul(h, np.transpose(r_matrices[counter]))
-            counter += 1
-            hx += h[0]
-            hy += h[1]
-            hz += h[2]
-
-        h = [hx, hy, hz]
-        h = h + self._calculate_mc(point)
-        return h
-
     def _bxbybz(self, point):
         """
-        Calculate the field at a point in local coordinates.
+        Calculate the b field at a fieldpoint using h field calculator and
+        converting to b field
         """
         h = self._hxhyhz(point)
         b = (h + self._calculate_mc(point)) * MU_0
@@ -828,6 +712,5 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             The magnetic field vector {Bx, By, Bz} in [T]
         """
         point = np.array([x, y, z])
-        # point = self._global_to_local([point])[0]
         b = self._bxbybz(point)
         return b
