@@ -32,7 +32,6 @@ import numpy as np
 
 from bluemira.base.constants import MU_0
 from bluemira.base.look_and_feel import bluemira_error
-from bluemira.geometry.coordinates import rotation_matrix_v1v2
 from bluemira.magnetostatics.baseclass import ArbitraryCrossSectionCurrentSource
 from bluemira.magnetostatics.tools import process_xyz_array
 
@@ -153,7 +152,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         self.d_hat = j_cross_m / np.linalg.norm(j_cross_m)
 
         # Normalised direction cosine matrix
-        self.dcm = np.array([normal, t_vec, ds / self.length])
+        self.dcm = np.array([t_vec, ds / self.length, normal])
 
         # setting up arrays for width and theta
         if isinstance(width, float) or isinstance(width, int):
@@ -206,35 +205,35 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             # add rotational angle
             sum_theta += self.theta[k]
             # variation in x and y using width and theta
-            dxy = np.array([w * math.cos(sum_theta), -w * math.sin(sum_theta)])
+            dxz = np.array([w * math.cos(sum_theta), -w * math.sin(sum_theta)])
             # midpoint results in no z increase/decrease
             if np.abs(sum_theta) == math.pi:
                 # difference betwen point 1, 2, 3, 4
-                d_12 = [dxy[0], 0, 0]
-                d_23 = [0, 0, len]
-                d_34 = [-dxy[0], 0, 0]
+                d_12 = [dxz[0], 0, 0]
+                d_23 = [0, len, 0]
+                d_34 = [-dxz[0], 0, 0]
             # first half of shape z decreases, depending on alpha, on front face
             # or depending on beta for rear face
             elif np.abs(sum_theta) < math.pi:
                 # change in z at front and rear face respectively
-                dz1 = dxy[1] / math.tan(self.alpha)
-                dz2 = dxy[1] / math.tan(self.beta)
-                dl += dz1 + dz2
+                dy1 = dxz[1] / math.tan(self.alpha)
+                dy2 = dxz[1] / math.tan(self.beta)
+                dl += dy1 + dy2
                 # difference betwen point 1, 2, 3, 4
-                d_12 = np.array([dxy[0], dxy[1], dz1])
-                d_23 = np.array([0, 0, len - dz1 - dz2])
-                d_34 = np.array([-dxy[0], -dxy[1], dz2])
+                d_12 = np.array([dxz[0], dy1, dxz[1]])
+                d_23 = np.array([0, len - dy1 - dy2, 0])
+                d_34 = np.array([-dxz[0], dy2, -dxz[1]])
             # second half of shape z increases, depending on alpha, on front face
             # or depending on beta for rear face
             else:
                 # change in z at front and rear face respectively
-                dz1 = np.abs(dxy[1]) / math.tan(self.alpha)
-                dz2 = np.abs(dxy[1]) / math.tan(self.beta)
-                dl += dz1 + dz2
+                dy1 = np.abs(dxz[1]) / math.tan(self.alpha)
+                dy2 = np.abs(dxz[1]) / math.tan(self.beta)
+                dl += dy1 + dy2
                 # difference betwen point 1, 2, 3, 4
-                d_12 = np.array([dxy[0], dxy[1], dz1])
-                d_23 = np.array([0, 0, len - dz1 - dz2])
-                d_34 = np.array([-dxy[0], -dxy[1], dz2])
+                d_12 = np.array([dxz[0], dy1, dxz[1]])
+                d_23 = np.array([0, len - dy1 - dy2, 0])
+                d_34 = np.array([-dxz[0], dy2, -dxz[1]])
             # check for if shape gets inverted ie front and rear face overlap
             if (dl) > len:
                 bluemira_error(
@@ -261,10 +260,10 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 p1 = p2
                 p4 = p3
                 p2 = np.array([0, 0, 0])
-                p3 = np.array([0, 0, len])
+                p3 = np.array([0, len, 0])
                 points += [np.vstack([p1, p2, p3, p4, p1])]
                 q = np.array([p2[0] - p1[0], p2[1] - p1[1]])
-                w = math.sqrt((dxy[0] * dxy[0] + dxy[1] * dxy[1]))
+                w = math.sqrt((dxz[0] * dxz[0] + dxz[1] * dxz[1]))
                 self.width = np.append(self.width, w)
                 theta = math.acos(np.dot(p, q) / (np.linalg.norm(p) * np.linalg.norm(q)))
                 self.theta = np.append(self.theta, theta)
@@ -690,7 +689,14 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         """
         h = self._hxhyhz(point)
         b = (h + self._calculate_mc(point)) * MU_0
-        return b
+        b_field = []
+        # convert negligible values to 0
+        for b_xyz in b:
+            if np.abs(b_xyz) < 1e-12:
+                b_xyz = 0
+            b_field += [b_xyz]
+        b_field = np.array([b_field[0], b_field[1], b_field[2]])
+        return b_field
 
     @process_xyz_array
     def field(self, x, y, z):
