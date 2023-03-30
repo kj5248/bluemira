@@ -301,6 +301,20 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         """
         Provides value of Mc at point p
         """
+
+        if self._inside_outside(p) == "inside":
+            # if p inside shape or on edge:
+            mc = self.current * self._calculate_vector_distance(p, self.d_hat)
+        else:
+            # if p outside shape
+            mc = 0.0
+        return mc * self.mc_hat
+
+    def _inside_outside(self, p):
+        """
+        Function to determine if a point p is inside or outside the prism,
+        on the surface counts as inside.
+        """
         pos = 0
         neg = 0
         # loop through sides
@@ -331,11 +345,12 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 neg += 1
         if (pos == self.n + 2) or (neg == self.n + 2):
             # if p inside shape or on edge:
-            mc = self.current * self._calculate_vector_distance(p, self.d_hat)
+            pos = "inside"
         else:
             # if p outside shape
-            mc = 0.0
-        return mc * self.mc_hat
+            pos = "outside"
+
+        return pos
 
     def _calculate_side_normals(self):
         """
@@ -416,23 +431,23 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         for i in range(self.n - 4):
             if i == 0:
                 # makes the first shape and loops back to start point
-                cut = np.append(p[:3, :], p[0, :])
+                cut = np.append(p[:3, :], p[:1, :], axis=0)
             else:
                 # makes remaining shapes and loops back to start point
-                cut = np.append(p[(0, i + 1, i + 2), :], p[0, :])
+                cut = np.append(p[(0, i + 1, i + 2), :], p[:1, :], axis=0)
             # adds new shapes to list
             shapes += [np.vstack([cut])]
         # creates final shape
-        cut = np.append(p[0, :], p[-3:, :])
+        cut = np.append(p[:1, :], p[-3:, :], axis=0)
         # adds start point to final shape
-        cut = np.append(cut, p[0, :])
+        cut = np.append(cut, p[:1, :], axis=0)
         # adds final shape to list
         shapes += [np.vstack([cut])]
         # rearranges shapes into array
         shape_arr = []
         for s in shapes:
-            shape_arr.append(s)
-        return np.array([shape_arr], dtype=object)
+            shape_arr += [s]
+        return shape_arr
 
     def _position_vector(self, point, fpoint):
         """
@@ -483,18 +498,21 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         yhat = np.cross(zhat, xhat)
         # x value (between vertex and fieldpoint)
         x = np.dot(xhat, r[0, :])
+        # x = fpoint[0]
         # if x suitably small set to 0
-        if x < 1e-8:
+        if x < 1e-12:
             x = 0.0
         # y value (between vertex and fieldpoint)
         y = np.dot(yhat, r[0, :])
+        # y = fpoint[1]
         # if y suitably small set to 0
-        if y < 1e-8:
+        if y < 1e-12:
             y = 0.0
         # z value (between vertex and fieldpoint)
         z = np.dot(zhat, r[0, :])
+        # z = fpoint[2]
         # if z suitably small set to 0
-        if z < 1e-8:
+        if z < 1e-12:
             z = 0.0
         # projections of area vectors along normal to trapezoid side
         p12 = np.dot(xhat, np.cross(r[0, :], r[1, :]))
@@ -631,7 +649,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
                 shapes = self._face_cutting(points)
                 # cycle through shapes to calculate field
                 for i in range(self.n - 4):
-                    shape = shapes[i, :, :]
+                    shape = shapes[i]
                     dist = []
                     for p in shape:
                         dist += [self._calculate_vector_distance(p, self.normals[k, :])]
@@ -698,6 +716,11 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         b_field = np.array([b_field[0], b_field[1], b_field[2]])
         return b_field
 
+        # def _bxbybz_in(point):
+        """
+        Calculate the b field at a point inside (or on the surface of) the prism
+        """
+
     @process_xyz_array
     def field(self, x, y, z):
         """
@@ -718,5 +741,10 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             The magnetic field vector {Bx, By, Bz} in [T]
         """
         point = np.array([x, y, z])
-        b = self._bxbybz(point)
+        if self._inside_outside == "inside":
+            # new magnetic field calculation not setup yet
+            # b = self._bxbybz_in(point)
+            b = self._bxbybz(point)
+        else:
+            b = self._bxbybz(point)
         return b
