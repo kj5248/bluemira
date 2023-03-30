@@ -301,7 +301,6 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         """
         Provides value of Mc at point p
         """
-
         if self._inside_outside(p) == "inside":
             # if p inside shape or on edge:
             mc = self.current * self._calculate_vector_distance(p, self.d_hat)
