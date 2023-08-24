@@ -186,6 +186,15 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         self.normals = self._calculate_side_normals()
         # set up cosine angles nprime and nprime2
         self.angles = self._calculate_angles()
+        # move prism so origin is centre of prism
+        centre = np.array(
+            [
+                np.sum(self.facepoints[:, :, 0]) / (2 * self.n),
+                np.sum(self.facepoints[:, :, 1]) / (2 * self.n),
+                np.sum(self.facepoints[:, :, 2]) / (2 * self.n),
+            ]
+        )
+        print(centre)
 
     def _calculate_points(self):
         """
@@ -316,6 +325,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         """
         pos = 0
         neg = 0
+        # print(p)
         # loop through sides
         for k in range(self.n):
             n = self.normals[k, :]
@@ -342,13 +352,15 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             else:
                 pos += 1
                 neg += 1
+        # print("positives = ", pos)
+        # print("negatives = ", neg)
         if (pos == self.n + 2) or (neg == self.n + 2):
             # if p inside shape or on edge:
             pos = "inside"
         else:
             # if p outside shape
             pos = "outside"
-
+        # print(pos)
         return pos
 
     def _calculate_side_normals(self):
@@ -494,8 +506,12 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             # maximising mc_hat
             else:
                 (m0,) = np.nonzero(m_out == m_out.max())
-            # taking combined result to identify start point
-            idx0 = np.intersect1d(m0, j0)[0]
+            if np.size(j0) == 1:
+                idx0 = j0[0]
+            elif np.size(m0) == 1:
+                idx0 = m0[0]
+            else:
+                idx0 = np.intersect1d(m0, j0)[0]
             # reverse direction if needed
             if (
                 np.linalg.norm(np.cross(points[idx0 + 1, :] - points[idx0, :], j_sc))
@@ -514,7 +530,12 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             j_out = np.dot(point, self.j_hat)
             (d0,) = np.nonzero(d_out == d_out.min())
             (j0,) = np.nonzero(j_out == j_out.min())
-            idx0 = np.intersect1d(d0, j0)[0]
+            if np.size(d0) == 1:
+                idx0 = d0[0]
+            elif np.size(j0) == 1:
+                idx0 = j0[0]
+            else:
+                idx0 = np.intersect1d(d0, j0)[0]
             # reverse direction if needed
             if (
                 np.linalg.norm(
@@ -686,6 +707,10 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
             d = -(self._calculate_vector_distance(points[0, :], self.mc_hat))
             points = self._points_reordering(points, self.normals[k, :])
             coords, lam, gam, psi, eta, zeta = self._vector_coordinates(points, fpoint)
+            # print("k = ", k)
+            # print("n = ", nprime, nprime2)
+            # print("D = ", d)
+            # print(points)
             # calculate h field in all directions
             hx = h_field_x(j, nprime, nprime2, d, coords, lam, gam, psi)
             hy = h_field_y(j, nprime, nprime2, d, coords, lam, gam, psi)

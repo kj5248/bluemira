@@ -231,6 +231,9 @@ class ArbitraryCrossSectionCurrentSource(CurrentSource):
         self.origin = self.origin @ r
         self.points = np.array([p @ r for p in self.points], dtype=object)
         self.dcm = self.dcm @ r
+        self.trap_vec = self.trap_vec @ r
+        self.filsl = np.array([f @ r for f in self.filsl], dtype=object)
+        self.filsu = np.array([f @ r for f in self.filsu], dtype=object)
 
     def _local_to_global(self, points):
         """
@@ -285,8 +288,20 @@ class SourceGroup(ABC):
     points: np.array
 
     def __init__(self, sources):
-        self.sources = sources
-        self.points = np.vstack([np.vstack(s.points) for s in self.sources])
+        self._sources = sources
+        # self.points = np.vstack([np.vstack(s.points) for s in self.sources])
+
+    @property
+    def sources(self):
+        return self._sources
+
+    @sources.setter
+    def sources(self, value):
+        self._sources = value
+        self.points = np.vstack([np.vstack(s.points) for s in self._sources])
+
+    def add_to_group(self, value: List[CurrentSource]):
+        self.sources = [*self.sources, *value]
 
     def set_current(self, current):
         """
