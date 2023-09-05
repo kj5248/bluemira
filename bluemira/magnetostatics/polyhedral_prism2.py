@@ -110,7 +110,7 @@ class PolyhedralPrismCurrentSource(ArbitraryCrossSectionCurrentSource):
         self.r = r
         self.area = self._cross_section_area()
         self.filsl, self.filsu = self._filament_setup()
-        # self.filament_current = self.current*np.pi*self.r**2/self.area
+        self.filament_current = self.current * np.pi * self.r**2 / self.area
         self.I_vec = normal
 
     def _cross_section_area(self):
